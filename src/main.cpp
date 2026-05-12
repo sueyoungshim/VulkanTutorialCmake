@@ -8,6 +8,8 @@
 // provides EXIT_SUCCESS and EXIT_FAILURE macros
 #include <cstdlib>      // macros are replaced by definition before compilation
 
+#include <optional>
+
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
@@ -21,6 +23,16 @@ const bool enableValidationLayers = false;
 const bool enableValidationLayers = true;
 #endif
 
+
+struct QueueFamilyIndices 
+{
+    std::optional<uint32_t> graphicsFamily;
+
+    bool isComplete()
+    {
+        return graphicsFamily.has_value();
+    }
+};
 
 class HelloTriangleApplication {
 public:
@@ -57,7 +69,81 @@ private:
     {
         // initialize vulkan library by creating an instance.
         createInstance();
+        //setupDeugMessenger(); skip for now
+        pickPhysicalDevice();
     }
+
+    void pickPhysicalDevice()
+    {
+        VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+
+        uint32_t deviceCount = 0;
+        vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+
+        if (deviceCount == 0)
+        {
+            throw std::runtime_error("failed to find GPUs with Vulkan support!");
+        }
+
+        std::vector<VkPhysicalDevice> devices(deviceCount);
+        vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+
+        for (const auto& device : devices) 
+        {
+            if (isDeviceSuitable(device))
+            {
+                physicalDevice = device;
+                break;
+            }
+        }
+
+        if (physicalDevice == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("failed to find a suitable gpu");
+        }
+        
+    }
+
+    bool isDeviceSuitable(VkPhysicalDevice device)
+    {
+        // could implement scoring each device for a favorable one (later)
+        // VkPhysicalDeviceProperties deviceProperties;
+        // vkGetPhysicalDeviceProperties(device, &deviceProperties);
+        // VkPhysicalDeviceFeatures deviceFeatures;
+        // vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+        QueueFamilyIndices indices = findQueueFamilies(device);
+
+        return indices.isComplete();
+    }
+
+    QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device)
+    {
+        QueueFamilyIndices indices;
+
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+        int i = 0;
+        for (const auto& queueFamily : queueFamilies)
+        {
+            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            {
+                indices.graphicsFamily = i;
+            }
+            if (indices.isComplete())
+            {
+                break;
+            }
+            i++;
+        }
+        return indices;
+    }
+
+    
     
     void createInstance()
     {
@@ -78,25 +164,35 @@ private:
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.pApplicationInfo = &appInfo;
                 
+        // Vulkan needs extensions to interface with the window.
         uint32_t glfwExtensionCount = 0;
         const char** glfwExtensions;
         glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
         
         std::vector<const char*> requiredExtensions;
-        
         for (uint32_t i = 0; i < glfwExtensionCount; i++)
         {
             requiredExtensions.emplace_back(glfwExtensions[i]);
         }
         
+        // VK_ERROR_INCOMPATIBLE_DRIVER -> MoltenVK
         requiredExtensions.emplace_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-        
         createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 
         createInfo.enabledExtensionCount = (uint32_t) requiredExtensions.size();
         createInfo.ppEnabledExtensionNames = requiredExtensions.data();
+
+        if (enableValidationLayers)
+        {
+            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+            createInfo.ppEnabledLayerNames = validationLayers.data();
+        } 
+        else
+        {
+            createInfo.enabledLayerCount = 0;
+        }
         
-                
+
         /*
         parameters: pointer to struct with creation info,
                     pointer to custom allocator callbacks, always nullptr in this tutorial,
@@ -130,8 +226,6 @@ private:
     {
         uint32_t layerCount;
         VkResult enumerateResult = vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
-        std::cout << enumerateResult << std::endl;
-        std::cout << layerCount << std::endl;
         
         std::vector<VkLayerProperties> availableLayers(layerCount);
         vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
