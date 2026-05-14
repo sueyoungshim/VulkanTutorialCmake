@@ -17,6 +17,10 @@ const std::vector<const char*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
 };
 
+const std::vector<const char*> deviceExtensions = {
+    "VK_KHR_portability_subset"
+};
+
 #ifdef NDEBUG
 const bool enableValidationLayers = false;
 #else
@@ -46,7 +50,10 @@ public:
 private:
     GLFWwindow* window;
     VkInstance instance;
-    
+    VkDevice device;
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+    VkQueue graphicsQueue;
+
     /*
      glfw = graphics library framework
         - create and manage windows
@@ -71,12 +78,78 @@ private:
         createInstance();
         //setupDeugMessenger(); skip for now
         pickPhysicalDevice();
+        createLogicalDevice();
     }
+
+    void createLogicalDevice()
+    {
+        QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
+        VkDeviceQueueCreateInfo queueCreateInfo {};
+        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
+        queueCreateInfo.queueCount = 1;
+
+        float queuePriority = 1.0f;
+        queueCreateInfo.pQueuePriorities = &queuePriority;
+
+        VkPhysicalDeviceFeatures deviceFeatures{};
+
+        VkDeviceCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+
+        createInfo.pQueueCreateInfos = &queueCreateInfo;
+        createInfo.queueCreateInfoCount = 1;
+        createInfo.pEnabledFeatures = &deviceFeatures;
+
+        // createInfo.enabledExtensionCount = 0;
+        std::vector<const char*> extensions = deviceGetRequiredExtensions();
+        createInfo.enabledExtensionCount = static_cast<uint32_t> (extensions.size());
+        createInfo.ppEnabledExtensionNames = extensions.data();
+
+        if (enableValidationLayers)
+        {
+            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+            createInfo.ppEnabledLayerNames = validationLayers.data();
+        }
+        else
+        {
+            createInfo.enabledLayerCount = 0;
+        }
+        
+        if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create logical device!");
+        }
+        vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
+
+    }
+
+    std::vector<const char *> deviceGetRequiredExtensions()
+    {
+        uint32_t deviceExtensionPropertyCount = 0;
+        vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtensionPropertyCount, nullptr);
+
+        std::vector<VkExtensionProperties> availableExtensions(deviceExtensionPropertyCount);
+        vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtensionPropertyCount, availableExtensions.data());
+
+        std::vector<const char *> extensions;
+        for (const char* extension : deviceExtensions)
+        {
+            for (const auto& avail : availableExtensions)
+            {
+                if (strcmp(extension, avail.extensionName) == 0)
+                {
+                    extensions.push_back(extension);
+                    break;
+                }
+            }
+        }
+        return extensions;
+    }   
 
     void pickPhysicalDevice()
     {
-        VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
 
@@ -101,7 +174,6 @@ private:
         {
             throw std::runtime_error("failed to find a suitable gpu");
         }
-        
     }
 
     bool isDeviceSuitable(VkPhysicalDevice device)
@@ -176,7 +248,11 @@ private:
         }
         
         // VK_ERROR_INCOMPATIBLE_DRIVER -> MoltenVK
+        #if defined __APPLE__ 
         requiredExtensions.emplace_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+        requiredExtensions.emplace_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+        #endif
+
         createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 
         createInfo.enabledExtensionCount = (uint32_t) requiredExtensions.size();
@@ -217,6 +293,7 @@ private:
 
     void cleanup()
     {
+        vkDestroyDevice(device, nullptr);
         vkDestroyInstance(instance, nullptr);
         glfwDestroyWindow(window);
         glfwTerminate();
